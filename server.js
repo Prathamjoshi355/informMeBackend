@@ -1,8 +1,7 @@
-const express = require('express')
+﻿const express = require('express')
 const fs = require('fs')
 const path = require('path')
 const bodyParser = require('body-parser')
-const cors = require('cors')
 const dotenv = require('dotenv')
 const { MongoClient } = require('mongodb')
 
@@ -10,41 +9,46 @@ const { MongoClient } = require('mongodb')
 dotenv.config({ path: path.join(__dirname, '../.env') })
 
 const app = express()
-// Configure CORS with an allowlist of origins. This uses a dynamic origin
-// check so we return the exact requesting Origin in Access-Control-Allow-Origin.
-const rawFrontend = process.env.FRONTEND_URL || process.env.VITE_FRONTEND_URL || 'https://informxme.com'
-const FRONTEND_ORIGIN = String(rawFrontend).replace(/\/+$/, '')
+const normalizeOrigin = (value = '') => String(value).replace(/\/+$/, '')
 const allowedOrigins = [
-  FRONTEND_ORIGIN,
+  normalizeOrigin(process.env.FRONTEND_URL || process.env.VITE_FRONTEND_URL || 'https://informxme.com'),
   'https://www.informxme.com',
   'http://localhost:5173',
-  'http://localhost:5174'
+  'http://localhost:5174',
+  'http://localhost:4000',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
+  'http://127.0.0.1:4000'
 ]
+const localOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/
 
-app.use(cors({
-  origin: function(origin, cb) {
-    // Allow non-browser requests with no origin (curl, servers)
-    if (!origin) return cb(null, true)
-    const norm = String(origin).replace(/\/+$/, '')
-    if (allowedOrigins.includes(norm)) return cb(null, true)
-    return cb(new Error('CORS origin denied'))
-  },
-  methods: ['GET','POST','OPTIONS','PUT','DELETE'],
-  credentials: true
-}))
+function isAllowedOrigin(origin) {
+  if (!origin) return true
+  const normalized = normalizeOrigin(origin)
+  return allowedOrigins.includes(normalized) || localOriginPattern.test(normalized)
+}
 
-// Ensure preflight requests return the correct headers
-app.options('*', (req, res) => {
-  const origin = req.headers.origin ? String(req.headers.origin).replace(/\/+$/, '') : ''
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin)
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE')
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    res.setHeader('Access-Control-Allow-Credentials', 'true')
-    return res.status(204).end()
+function applyCorsHeaders(req, res) {
+  const origin = req.headers.origin
+  const requestHeaders = req.headers['access-control-request-headers']
+
+  if (origin && isAllowedOrigin(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', normalizeOrigin(origin))
+    res.setHeader('Vary', 'Origin')
   }
-  // Deny
-  return res.status(403).end()
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE')
+  res.setHeader('Access-Control-Allow-Headers', requestHeaders || 'Content-Type,Authorization')
+  res.setHeader('Access-Control-Max-Age', '86400')
+}
+
+app.use((req, res, next) => {
+  applyCorsHeaders(req, res)
+
+  if (req.method === 'OPTIONS') {
+    return res.status(isAllowedOrigin(req.headers.origin) ? 204 : 403).end()
+  }
+
+  next()
 })
 app.use(bodyParser.json())
 
@@ -115,26 +119,33 @@ app.get('/api/submissions', async (req,res)=>{
   res.json(readDB())
 })
 
-// Admin endpoint to fetch submissions (password protected)
-app.get('/admin/submissions', (req, res) => {
+async function getAdminSubmissions(req, res) {
   const password = req.query.pwd
   const adminPwd = process.env.ADMIN_PASSWORD || 'admin123'
-  
+
   if (password !== adminPwd) {
     return res.status(401).json({ error: 'Unauthorized' })
   }
-  
-  // Return submissions from MongoDB or file
+
   if (submissionsCollection) {
-    submissionsCollection.find().toArray()
-      .then(rows => res.json(rows))
-      .catch(err => {
-        console.error('Mongo fetch failed', err)
-        res.json(readDB())
-      })
-  } else {
-    res.json(readDB())
+    try {
+      const rows = await submissionsCollection.find().toArray()
+      return res.json(rows)
+    } catch (err) {
+      console.error('Mongo fetch failed', err)
+    }
   }
+
+  res.json(readDB())
+}
+
+app.get('/api/admin/submissions', getAdminSubmissions)
+app.get('/admin/submissions', getAdminSubmissions)
+
+app.use((err, req, res, next) => {
+  applyCorsHeaders(req, res)
+  console.error(err)
+  res.status(err.status || 500).json({ error: 'Internal server error' })
 })
 
 const PORT = process.env.PORT || 4000
