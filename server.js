@@ -10,7 +10,16 @@ const { MongoClient } = require('mongodb')
 dotenv.config({ path: path.join(__dirname, '../.env') })
 
 const app = express()
-app.use(cors())
+// Configure CORS to allow the frontend origin (set FRONTEND_URL in .env)
+const FRONTEND_ORIGIN = process.env.FRONTEND_URL || process.env.VITE_FRONTEND_URL || 'https://informxme.com'
+app.use(cors({ origin: FRONTEND_ORIGIN, methods: ['GET','POST','OPTIONS'], credentials: true }))
+app.use((req, res, next) => {
+  // Ensure CORS headers are always present (helps when behind proxies)
+  res.setHeader('Access-Control-Allow-Origin', FRONTEND_ORIGIN)
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+  next()
+})
 app.use(bodyParser.json())
 
 const DB = path.join(__dirname, 'submissions.json')
