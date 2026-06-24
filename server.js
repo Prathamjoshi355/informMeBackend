@@ -10,25 +10,41 @@ const { MongoClient } = require('mongodb')
 dotenv.config({ path: path.join(__dirname, '../.env') })
 
 const app = express()
-// Configure CORS to allow the frontend origin (set FRONTEND_URL in .env)
-// Normalize FRONTEND_ORIGIN (remove trailing slash) so it matches the request Origin header
+// Configure CORS with an allowlist of origins. This uses a dynamic origin
+// check so we return the exact requesting Origin in Access-Control-Allow-Origin.
 const rawFrontend = process.env.FRONTEND_URL || process.env.VITE_FRONTEND_URL || 'https://informxme.com'
 const FRONTEND_ORIGIN = String(rawFrontend).replace(/\/+$/, '')
-app.use(cors({ origin: FRONTEND_ORIGIN, methods: ['GET','POST','OPTIONS'], credentials: true }))
-app.use((req, res, next) => {
-  // Ensure CORS headers are always present (helps when behind proxies)
-  res.setHeader('Access-Control-Allow-Origin', FRONTEND_ORIGIN)
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-  next()
-})
-// Explicitly handle CORS preflight requests for all routes
+const allowedOrigins = [
+  FRONTEND_ORIGIN,
+  'https://www.informxme.com',
+  'http://localhost:5173',
+  'http://localhost:5174'
+]
+
+app.use(cors({
+  origin: function(origin, cb) {
+    // Allow non-browser requests with no origin (curl, servers)
+    if (!origin) return cb(null, true)
+    const norm = String(origin).replace(/\/+$/, '')
+    if (allowedOrigins.includes(norm)) return cb(null, true)
+    return cb(new Error('CORS origin denied'))
+  },
+  methods: ['GET','POST','OPTIONS','PUT','DELETE'],
+  credentials: true
+}))
+
+// Ensure preflight requests return the correct headers
 app.options('*', (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', FRONTEND_ORIGIN)
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-  res.setHeader('Access-Control-Allow-Credentials', 'true')
-  return res.status(204).send('')
+  const origin = req.headers.origin ? String(req.headers.origin).replace(/\/+$/, '') : ''
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    res.setHeader('Access-Control-Allow-Credentials', 'true')
+    return res.status(204).end()
+  }
+  // Deny
+  return res.status(403).end()
 })
 app.use(bodyParser.json())
 
