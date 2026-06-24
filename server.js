@@ -80,6 +80,28 @@ app.get('/api/submissions', async (req,res)=>{
   res.json(readDB())
 })
 
+// Admin endpoint to fetch submissions (password protected)
+app.get('/admin/submissions', (req, res) => {
+  const password = req.query.pwd
+  const adminPwd = process.env.ADMIN_PASSWORD || 'admin123'
+  
+  if (password !== adminPwd) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+  
+  // Return submissions from MongoDB or file
+  if (submissionsCollection) {
+    submissionsCollection.find().toArray()
+      .then(rows => res.json(rows))
+      .catch(err => {
+        console.error('Mongo fetch failed', err)
+        res.json(readDB())
+      })
+  } else {
+    res.json(readDB())
+  }
+})
+
 const PORT = process.env.PORT || 4000
 
 async function start(){
