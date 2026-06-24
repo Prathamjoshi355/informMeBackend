@@ -11,7 +11,9 @@ dotenv.config({ path: path.join(__dirname, '../.env') })
 
 const app = express()
 // Configure CORS to allow the frontend origin (set FRONTEND_URL in .env)
-const FRONTEND_ORIGIN = process.env.FRONTEND_URL || process.env.VITE_FRONTEND_URL || 'https://informxme.com'
+// Normalize FRONTEND_ORIGIN (remove trailing slash) so it matches the request Origin header
+const rawFrontend = process.env.FRONTEND_URL || process.env.VITE_FRONTEND_URL || 'https://informxme.com'
+const FRONTEND_ORIGIN = String(rawFrontend).replace(/\/+$/, '')
 app.use(cors({ origin: FRONTEND_ORIGIN, methods: ['GET','POST','OPTIONS'], credentials: true }))
 app.use((req, res, next) => {
   // Ensure CORS headers are always present (helps when behind proxies)
